@@ -184,6 +184,24 @@ textarea{resize:vertical;min-height:66px;font-family:var(--sans);line-height:1.5
 
 #status{font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.06em}
 
+/* ---------- send dialog ---------- */
+#scrim{
+  position:fixed;inset:0;z-index:50;background:rgba(30,43,35,.34);
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+#scrim[hidden]{display:none}
+.dialog{
+  background:var(--card);border:1px solid var(--line);border-radius:3px;
+  width:100%;max-width:400px;padding:22px 22px 18px;
+  box-shadow:0 12px 40px rgba(30,43,35,.3);
+}
+.dialog h3{
+  font-family:var(--serif);font-size:20px;font-weight:600;margin:0 0 8px;letter-spacing:-.01em;
+}
+.dhint{font-size:12.5px;color:var(--ink-soft);line-height:1.55;margin:0 0 16px}
+.dialog textarea{min-height:56px}
+.dacts{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+
 @media (max-width:760px){
   #panel{width:100%;top:52px}
   .search,.treename{display:none}
@@ -213,6 +231,7 @@ textarea{resize:vertical;min-height:66px;font-family:var(--sans);line-height:1.5
   </div>
   <button class="btn" id="addBtn">Add person</button>
   <button class="btn" id="saveBtn">Save file</button>
+  <button class="btn" id="sendBtn" hidden>Email tree</button>
   <button class="btn" id="openBtn">Open file</button>
   <button class="btn" id="printBtn">Print</button>
   <input type="file" id="fileIn" accept=".json,application/json" hidden>
@@ -238,6 +257,21 @@ textarea{resize:vertical;min-height:66px;font-family:var(--sans);line-height:1.5
   <div class="p-body" id="pBody"></div>
 </aside>
 
+<div id="scrim" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="sTitle">
+    <h3 id="sTitle">Email this tree</h3>
+    <p class="dhint" id="sHint"></p>
+    <div class="f"><label for="sName">Your name</label>
+      <input type="text" id="sName" placeholder="So they know who sent it"></div>
+    <div class="f"><label for="sNote">What did you change? (optional)</label>
+      <textarea id="sNote" placeholder="Added Grandma's sister and her three kids."></textarea></div>
+    <div class="dacts">
+      <button class="btn" id="sCancel">Cancel</button>
+      <button class="btn primary" id="sSend">Send</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -249,6 +283,19 @@ var NODE_W=168, NODE_H=76, H_GAP=28, V_GAP=92, ROOT_GAP=70, PAD=90;
 var KEY="familyRegister.v1";
 /* Paste a saved tree here to bake it into the page for every visitor. */
 var SEED=null;
+
+/* ---- Sending a copy to your inbox ----------------------------------------
+   Fill in ONE of these two. Leave both blank and the Email button hides.
+
+   accessKey : a free Web3Forms access key (web3forms.com — no account
+               needed, 250 sends/month). One click, tree arrives as text
+               in your inbox. The key is not a secret; it is safe in
+               public page source.
+   mailto    : your email address. No signup at all. Downloads the file
+               and opens a pre-addressed draft for them to attach it to.
+
+   If both are filled, accessKey wins.                                      */
+var SEND={ accessKey:"", mailto:"", toName:"the family archivist" };
 var ROMAN=["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII","XIII","XIV","XV"];
 
 /* ============ state ============ */
@@ -781,15 +828,84 @@ document.getElementById("search").addEventListener("input",function(){
 });
 
 document.getElementById("saveBtn").onclick=function(){
-  var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-  var a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download=(data.name||"family-tree").replace(/[^\w\-]+/g,"-").toLowerCase()+".json";
-  document.body.appendChild(a);a.click();a.remove();
-  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+  download();
   toast("File downloaded");
 };
 document.getElementById("openBtn").onclick=function(){document.getElementById("fileIn").click();};
+
+/* ---- email a copy ---- */
+var scrim=document.getElementById("scrim"),
+    sendBtn=document.getElementById("sendBtn"),
+    sendMode=SEND.accessKey?"form":(SEND.mailto?"mailto":null);
+
+function fileName(){
+  return (data.name||"family-tree").replace(/[^\w\-]+/g,"-").toLowerCase()+".json";
+}
+function download(){
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=fileName();
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+}
+
+if(sendMode){
+  sendBtn.hidden=false;
+  sendBtn.textContent="Email tree";
+  document.getElementById("sHint").textContent = sendMode==="form"
+    ? "Your version of the tree goes straight to "+SEND.toName+", who merges it into the master copy. Your own edits stay here either way."
+    : "This downloads your tree, then opens an email to "+SEND.toName+". Attach the downloaded file to that email before sending it.";
+  sendBtn.onclick=function(){
+    scrim.hidden=false;
+    setTimeout(function(){document.getElementById("sName").focus();},40);
+  };
+  document.getElementById("sCancel").onclick=function(){scrim.hidden=true;};
+  scrim.addEventListener("click",function(e){ if(e.target===scrim) scrim.hidden=true; });
+
+  document.getElementById("sSend").onclick=function(){
+    var who=document.getElementById("sName").value.trim()||"Someone",
+        note=document.getElementById("sNote").value.trim(),
+        btn=this;
+
+    if(sendMode==="mailto"){
+      download();
+      var body="From: "+who+"\n\n"+(note?note+"\n\n":"")+
+        "IMPORTANT: attach the file "+fileName()+" that just downloaded, then send.";
+      window.location.href="mailto:"+encodeURIComponent(SEND.mailto)+
+        "?subject="+encodeURIComponent("Family tree update from "+who)+
+        "&body="+encodeURIComponent(body);
+      scrim.hidden=true;
+      toast("File downloaded — attach it to the draft");
+      return;
+    }
+
+    btn.disabled=true;btn.textContent="Sending…";
+    fetch("https://api.web3forms.com/submit",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json"},
+      body:JSON.stringify({
+        access_key:SEND.accessKey,
+        subject:"Family tree update from "+who,
+        from_name:who,
+        message:(note?note+"\n\n":"")+
+          "--- Save everything below as "+fileName()+" and open it in the tree ---\n\n"+
+          JSON.stringify(data,null,2)
+      })
+    }).then(function(r){return r.json();}).then(function(res){
+      btn.disabled=false;btn.textContent="Send";
+      if(res&&res.success){
+        scrim.hidden=true;
+        document.getElementById("sNote").value="";
+        toast("Sent to "+SEND.toName);
+      }else{
+        toast("Send failed — use Save file and email it yourself");
+      }
+    }).catch(function(){
+      btn.disabled=false;btn.textContent="Send";
+      toast("Send failed — use Save file and email it yourself");
+    });
+  };
+}
 document.getElementById("fileIn").addEventListener("change",function(e){
   var f=e.target.files[0];if(!f) return;
   var r=new FileReader();
@@ -811,7 +927,9 @@ document.getElementById("fileIn").addEventListener("change",function(e){
 });
 
 window.addEventListener("keydown",function(e){
-  if(e.key==="Escape") closePanel();
+  if(e.key!=="Escape") return;
+  if(!scrim.hidden){scrim.hidden=true;return;}
+  closePanel();
 });
 window.addEventListener("beforeunload",save);
 
